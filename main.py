@@ -56,7 +56,7 @@ def main(
         torch.cuda.manual_seed(seed)
         device = torch.device('cuda')
 
-    Load train/validation/test tasksets using the benchmark interface
+    # Load train/validation/test tasksets using the benchmark interface
     tasksets = l2l.vision.benchmarks.get_tasksets('omniglot',
                                                   train_ways=ways,
                                                   train_samples=2*shots,

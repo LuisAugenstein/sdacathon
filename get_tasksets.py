@@ -15,6 +15,7 @@ import pandas as pd
 from collections import namedtuple
 import torch
 from PIL import Image
+import torchvision
 
 BenchmarkTasksets = namedtuple(
     'BenchmarkTasksets', ('train', 'validation', 'test_adaptation', 'test_evaluation'))
@@ -59,17 +60,23 @@ class TensorTask():
         for filename_task in filename_tasks:
             # create labels tensor
             positive_labels_tensor = torch.ones(
-                filename_task['images_positive'].size(0))
+                len(filename_task['images_positive']))
             negative_labels_tensor = torch.zeros(
-                filename_task['images_negative'].size(0))
+                len(filename_task['images_negative']))
             labels_tensor = torch.cat(
                 [positive_labels_tensor, negative_labels_tensor])
             # create images_tensor
+            transforms = torchvision.transforms.Compose([
+                torchvision.transforms.PILToTensor(),
+                torchvision.transforms.CenterCrop(280),
+                torchvision.transforms.Resize(28)
+            ])
             positive_images_tensor = self._to_tensor(
-                filename_task['images_positive'])
+                filename_task['images_positive'], transforms)
             negative_images_tensor = self._to_tensor(
-                filename_task['images_negative'])
-            images_tensor = torch.cat([positive_images_tensor, negative_images_tensor])
+                filename_task['images_negative'], transforms)
+            images_tensor = torch.cat(
+                [positive_images_tensor, negative_images_tensor])
             tensor_tasks.append({
                 "label": filename_task['label'],
                 "images": images_tensor,
@@ -79,13 +86,16 @@ class TensorTask():
         return tensor_tasks
 
     def _to_tensor(self, image_names, transforms):
-        images_tensor = []
+        images_tensor_list = []
         for image_name in image_names:
-            image_path = os.path.join(self.data_directory, 'images', image_name)
+            image_path = os.path.join(
+                self.data_directory, 'images', image_name)
             img = Image.open(image_path)
             tensor = transforms(img)
-            images_tensor.append(tensor)
+            images_tensor_list.append(tensor)
+        images_tensor = torch.cat(images_tensor_list)
         return images_tensor
+
 
 def get_tasksets():
     train_tasks = TensorTask('/home/luis/sdacathon/data/meta-train/pretrain')
