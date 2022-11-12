@@ -77,12 +77,15 @@ class TensorTask():
                 filename_task['images_negative'], transforms)
             images_tensor = torch.cat(
                 [positive_images_tensor, negative_images_tensor])
+            # shuffle tensors
+            random_indices = torch.randperm(images_tensor.size(0))
+            shuffled_images_tensor = images_tensor[random_indices, :]
+            shuffled_labels_tensor = labels_tensor[random_indices]
             tensor_tasks.append({
                 "label": filename_task['label'],
-                "images": images_tensor,
-                "labels": labels_tensor
+                "images": shuffled_images_tensor,
+                "labels": shuffled_labels_tensor
             })
-
         return tensor_tasks
 
     def _to_tensor(self, image_names, transforms):
@@ -92,7 +95,7 @@ class TensorTask():
                 self.data_directory, 'images', image_name)
             img = Image.open(image_path)
             tensor = transforms(img)
-            images_tensor_list.append(tensor)
+            images_tensor_list.append(tensor[None, :])
         images_tensor = torch.cat(images_tensor_list)
         return images_tensor
 
@@ -106,7 +109,3 @@ def get_tasksets():
     test_evaluation_tasks = TensorTask(
         '/home/luis/sdacathon/data/meta-test/test')
     return BenchmarkTasksets(train_tasks, validation_tasks, test_adaptation_tasks, test_evaluation_tasks)
-
-
-tasksets = get_tasksets()
-print(tasksets)
