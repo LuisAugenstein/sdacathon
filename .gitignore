@@ -1,2 +1,3 @@
 images/
 *.Identifier
+__pycache__
