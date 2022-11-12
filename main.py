@@ -5,7 +5,7 @@ import torch
 import learn2learn as l2l
 
 from torch import nn, optim
-from get_tasksets import get_tasks
+from get_tasksets import get_tasksets
 
 
 def accuracy(predictions, targets):
@@ -13,17 +13,21 @@ def accuracy(predictions, targets):
     return (predictions == targets).sum().float() / targets.size(0)
 
 
-def fast_adapt(batch, learner, loss, adaptation_steps, shots, ways, device):
-    data, labels = batch
-    data, labels = data.to(device), labels.to(device)
-
-    # Separate data into adaptation/evalutation sets
-    adaptation_indices = np.zeros(data.size(0), dtype=bool)
-    adaptation_indices[np.arange(shots*ways) * 2] = True
-    evaluation_indices = torch.from_numpy(~adaptation_indices)
-    adaptation_indices = torch.from_numpy(adaptation_indices)
+def meta_train_test_split(data, labels):
+    shots = np.min([5, data.size(0) // 2])
+    indices = torch.cat([torch.ones(shots, dtype=torch.bool), torch.zeros(
+        data.size(0) - shots, dtype=torch.bool)])
+    random_permuation = torch.randperm(indices.size(0))
+    adaptation_indices = indices[random_permuation]
+    evaluation_indices = torch.logical_not(adaptation_indices)
     adaptation_data, adaptation_labels = data[adaptation_indices], labels[adaptation_indices]
     evaluation_data, evaluation_labels = data[evaluation_indices], labels[evaluation_indices]
+    return adaptation_data, adaptation_labels, evaluation_data, evaluation_labels
+
+
+def fast_adapt(adaptation_data, adaptation_labels, evaluation_data, evaluation_labels, learner, loss, adaptation_steps, device):
+    adaptation_data, adaptation_labels = adaptation_data.to(device), adaptation_labels.to(device)
+    evaluation_data, evaluation_labels = evaluation_data.to(device), evaluation_labels.to(device)
 
     # Adapt the model
     for step in range(adaptation_steps):
@@ -38,8 +42,7 @@ def fast_adapt(batch, learner, loss, adaptation_steps, shots, ways, device):
 
 
 def main(
-        ways=5,
-        shots=1,
+        ways=1,
         meta_lr=0.003,
         fast_lr=0.5,
         meta_batch_size=32,
@@ -56,19 +59,10 @@ def main(
         torch.cuda.manual_seed(seed)
         device = torch.device('cuda')
 
-    # Load train/validation/test tasksets using the benchmark interface
-    tasksets = l2l.vision.benchmarks.get_tasksets('omniglot',
-                                                  train_ways=ways,
-                                                  train_samples=2*shots,
-                                                  test_ways=ways,
-                                                  test_samples=2*shots,
-                                                  num_tasks=20000,
-                                                  root='~/data',
-                                                  )
     tasksets = get_tasksets()
 
     # Create model
-    model = l2l.vision.models.OmniglotFC(28 ** 2, ways)
+    model = l2l.vision.models.OmniglotFC(3 * (28 ** 2), ways)
     model.to(device)
     maml = l2l.algorithms.MAML(model, lr=fast_lr, first_order=False)
     opt = optim.Adam(maml.parameters(), meta_lr)
@@ -83,28 +77,23 @@ def main(
         for task in range(meta_batch_size):
             # Compute meta-training loss
             learner = maml.clone()
-            batch = tasksets.train.sample()
-            evaluation_error, evaluation_accuracy = fast_adapt(batch,
-                                                               learner,
-                                                               loss,
-                                                               adaptation_steps,
-                                                               shots,
-                                                               ways,
-                                                               device)
+            data, labels = tasksets.train.sample()
+            meta_sets = meta_train_test_split(data, labels)
+            adaptation_data, adaptation_labels, evaluation_data, evaluation_labels = meta_sets
+            evaluation_error, evaluation_accuracy = fast_adapt(
+                adaptation_data, adaptation_labels, evaluation_data, evaluation_labels, learner, loss, adaptation_steps, device)
             evaluation_error.backward()
             meta_train_error += evaluation_error.item()
             meta_train_accuracy += evaluation_accuracy.item()
 
             # Compute meta-validation loss
             learner = maml.clone()
-            batch = tasksets.validation.sample()
-            evaluation_error, evaluation_accuracy = fast_adapt(batch,
-                                                               learner,
-                                                               loss,
-                                                               adaptation_steps,
-                                                               shots,
-                                                               ways,
-                                                               device)
+            data, labels = tasksets.validation.sample()
+            meta_sets = meta_train_test_split(data, labels)
+            adaptation_data, adaptation_labels, evaluation_data, evaluation_labels = meta_sets
+            evaluation_error, evaluation_accuracy = fast_adapt(
+                adaptation_data, adaptation_labels, evaluation_data, evaluation_labels, learner, loss, adaptation_steps, device)
+
             meta_valid_error += evaluation_error.item()
             meta_valid_accuracy += evaluation_accuracy.item()
 
@@ -123,17 +112,14 @@ def main(
 
     meta_test_error = 0.0
     meta_test_accuracy = 0.0
-    for task in range(meta_batch_size):
+    for index in range(len(tasksets.test_adaptation)):
         # Compute meta-testing loss
         learner = maml.clone()
-        batch = tasksets.test.sample()
-        evaluation_error, evaluation_accuracy = fast_adapt(batch,
-                                                           learner,
-                                                           loss,
-                                                           adaptation_steps,
-                                                           shots,
-                                                           ways,
-                                                           device)
+        adaptation_data, adaptation_labels = tasksets.test_adaptation[index]
+        evaluation_data, evaluation_labels = tasksets.test_evaluation[index]
+        evaluation_error, evaluation_accuracy = fast_adapt(
+            adaptation_data, adaptation_labels, evaluation_data, evaluation_labels, learner, loss, adaptation_steps, device)
+
         meta_test_error += evaluation_error.item()
         meta_test_accuracy += evaluation_accuracy.item()
     print('Meta Test Error', meta_test_error / meta_batch_size)
