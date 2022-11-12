@@ -64,7 +64,7 @@ class TensorTask():
             negative_labels_tensor = torch.zeros(
                 len(filename_task['images_negative']))
             labels_tensor = torch.cat(
-                [positive_labels_tensor, negative_labels_tensor])
+                [positive_labels_tensor, negative_labels_tensor])[:, None]
             # create images_tensor
             transforms = torchvision.transforms.Compose([
                 torchvision.transforms.PILToTensor(),
@@ -95,6 +95,7 @@ class TensorTask():
                 self.data_directory, 'images', image_name)
             img = Image.open(image_path)
             tensor = transforms(img)
+            tensor = tensor.type(torch.float)
             images_tensor_list.append(tensor[None, :])
         images_tensor = torch.cat(images_tensor_list)
         return images_tensor

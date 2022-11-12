@@ -9,8 +9,12 @@ from get_tasksets import get_tasksets
 
 
 def accuracy(predictions, targets):
-    predictions = predictions.argmax(dim=1).view(targets.shape)
-    return (predictions == targets).sum().float() / targets.size(0)
+    treshold = torch.tensor([0.5])
+    binary_predictions = (predictions.cpu() > treshold)*1
+    equal = binary_predictions == targets.cpu()
+    sum = equal.type(torch.float).sum()
+    n = targets.size(0)
+    return sum / n
 
 
 def meta_train_test_split(data, labels):
@@ -31,12 +35,13 @@ def fast_adapt(adaptation_data, adaptation_labels, evaluation_data, evaluation_l
 
     # Adapt the model
     for step in range(adaptation_steps):
-        train_error = loss(learner(adaptation_data), adaptation_labels)
+        prediction = learner(adaptation_data)
+        train_error = loss(prediction.squeeze(), adaptation_labels.squeeze())
         learner.adapt(train_error)
 
     # Evaluate the adapted model
     predictions = learner(evaluation_data)
-    valid_error = loss(predictions, evaluation_labels)
+    valid_error = loss(predictions.squeeze(), evaluation_labels.squeeze())
     valid_accuracy = accuracy(predictions, evaluation_labels)
     return valid_error, valid_accuracy
 
@@ -100,10 +105,10 @@ def main(
         # Print some metrics
         print('\n')
         print('Iteration', iteration)
-        print('Meta Train Error', meta_train_error / meta_batch_size)
-        print('Meta Train Accuracy', meta_train_accuracy / meta_batch_size)
-        print('Meta Valid Error', meta_valid_error / meta_batch_size)
-        print('Meta Valid Accuracy', meta_valid_accuracy / meta_batch_size)
+        print('Meta Train Error', meta_train_error)
+        print('Meta Train Accuracy', meta_train_accuracy)
+        print('Meta Valid Error', meta_valid_error)
+        print('Meta Valid Accuracy', meta_valid_accuracy)
 
         # Average the accumulated gradients and optimize
         for p in maml.parameters():
